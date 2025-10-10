@@ -10,10 +10,10 @@ use embedded_graphics::{
     prelude::*,
     pixelcolor::Rgb565
 };
-use pitft_async::clock_util::DoubleTimerSession;
+use pitft_async::clock_util::{DoubleTimerSession, SessionNotifier};
 use pitft_async::{button::Button, clock_util::SessionState, tft::TFT};
 use log::info;
-
+use pitft_async::error::{Result, Error};
 
 #[derive(Debug)]
 pub enum Never {}
@@ -26,8 +26,12 @@ async fn run() {
 }
 
 #[esp_hal_embassy::main]
-async fn main(spawner: Spawner) {
-    // generator version: 0.2.2
+async fn main(spawner: Spawner) -> ! {
+    let err = inner_main(spawner).await.unwrap_err();
+    panic!("{err}")
+}
+
+async fn inner_main(spawner: Spawner) -> Result<Never> {
 
     let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
     let peripherals = esp_hal::init(config);
@@ -57,11 +61,11 @@ async fn main(spawner: Spawner) {
     tft.clear(Rgb565::BLACK);
     tft.draw_image();
     tft.render_border();
-    tft.draw_focus_time("im a new soul :3");
-    tft.draw_unfocused_time("test");
 
-    let mut session = DoubleTimerSession::new(tft, spawner);
+    static SESSION_NOTIFIER: SessionNotifier = DoubleTimerSession::notifier();
+    let mut session = DoubleTimerSession::new(tft, spawner, &SESSION_NOTIFIER)?;
     loop {
+        esp_println::println!("im in da embussy :3");
         state = state.execute(&mut session, &mut button).await;
     }
 }

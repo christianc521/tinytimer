@@ -1,7 +1,8 @@
-use embassy_executor::Spawner;
+use embassy_executor::{SpawnError, Spawner};
+use embassy_futures::select::{select, Either};
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, channel::Channel};
-use embassy_time::{ Duration, Ticker };
-use crate::{button::Button, tft::TFT, time_util::Time};
+use embassy_time::{ Duration, Ticker, Timer };
+use crate::{button::{Button, PressDuration}, draw_panels::{Panel, PanelPosition, Payload}, render_display::{TFTNotifier, TFTRender}, tft::TFT, time_util::Time};
 
 
 /*
@@ -42,65 +43,72 @@ impl SessionState {
         button: &mut Button<'_>) -> Self 
     {
         match self {
-            SessionState::Working => todo!(),
+            SessionState::Working => self.execute_working(session, button).await,
             SessionState::Break => todo!(),
             SessionState::Paused => todo!(),
+        }
+    }
 
+    pub(crate) fn render(self, time: &Time) -> (Panel, Duration) {
+        match self {
+            Self::Working => Self::render_working(time),
+            _ => todo!()
         }
     }
 
     async fn execute_working(self, session: &mut DoubleTimerSession<'_>, button: &mut Button<'_>) -> Self {
-        
-
+        session.set_state(self).await;
+        match button.press_duration().await {
+            PressDuration::Short => {
+                todo!()
+            }
+            PressDuration::Long => {
+                todo!()
+            }
+        }
     }
+
+    fn render_working(time: &Time) -> (Panel, Duration) {
+        let (display_time, sleep_dur) = time.sleep_100ms();
+        let panel = Panel::from_time(display_time, PanelPosition::Middle);
+        (panel, sleep_dur)
+    }
+
 }
 
 pub type SessionNotifier = (SessionOuterNotifier, TFTNotifier);
 pub type SessionOuterNotifier = Channel<CriticalSectionRawMutex, SessionNotice, 4>;
 
-pub struct DoubleTimerSession<'spi> //(&'spi SessionOuterNotifier);
-{
-    tft: TFT<'spi>,
-    work_clock: Duration,
-    break_clock: Duration,
-    session_state: SessionState,
-    spawner: Spawner
-}
+pub struct DoubleTimerSession<'spi>(&'spi SessionOuterNotifier);
+//{
+//    tft: TFT<'spi>,
+//    work_clock: Duration,
+//    break_clock: Duration,
+//    session_state: SessionState,
+//    spawner: Spawner
+//}
 
 impl<'spi> DoubleTimerSession<'spi> {
     pub fn new(
-        tft: TFT<'spi>,
+        tft: TFT<'static>,
         spawner: Spawner,
         notifier: &'static SessionNotifier,
-    ) -> Result<Self, Spawn> {
-        DoubleTimerSession {
-            tft,
-            work_clock: Duration::from_millis(0),
-            break_clock: Duration::from_millis(0),
-            session_state: SessionState::Paused,
-            spawner
-        }
+    ) -> Result<Self, SpawnError> {
+        let (outer_notifier, tft_notifier) = notifier;
+        let tft = TFTRender::new(tft, tft_notifier, spawner)?;
+        spawner.spawn(device_loop(outer_notifier, tft))?;
+        Ok(Self(outer_notifier))
     }
 
-    pub async fn run_work_clock(&mut self) {
-        self.session_state = SessionState::Working;
-        let mut ticker = Ticker::every(Duration::from_millis(100));
-
-        while self.session_state == SessionState::Working {
-            self.work_clock += Duration::from_millis(100);
-            ticker.next().await;
-        }
+    pub(crate) async fn set_state(&self, new_state: SessionState) {
+        self.0.send(SessionNotice::SetState(new_state)).await;
     }
 
-    pub async fn run_break_clock(&mut self) {
-        self.session_state = SessionState::Break;
-        let mut ticker = Ticker::every(Duration::from_millis(100));
-
-        while self.session_state == SessionState::Break {
-            self.break_clock += Duration::from_millis(100);
-            ticker.next().await;
-        }
+    #[must_use]
+    pub const fn notifier() -> SessionNotifier {
+        (Channel::new(), TFTRender::notifier())
     }
+
 }
 
 pub enum SessionNotice {
@@ -122,4 +130,16 @@ impl SessionNotice {
 }
 
 #[embassy_executor::task]
-async fn device_loop(session_notifier: )
+async fn device_loop(session_notifier: &'static SessionOuterNotifier, tft_renderer: TFTRender<'static>) -> ! {
+    let mut time = Time::default();
+    let mut session_state = SessionState::default();
+
+    loop {
+        let (panel, sleep_dur) = session_state.render(&time);
+        tft_renderer.render(panel);
+        if let Either::First(notification) = select(session_notifier.receive(), Timer::after(sleep_dur)).await
+        {
+            notification.apply(&mut time, &mut session_state);
+        }
+    }
+}

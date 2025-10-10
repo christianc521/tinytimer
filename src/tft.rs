@@ -1,4 +1,3 @@
-use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, signal::Signal};
 use esp_backtrace as _;
 use esp_hal::gpio::Output;
 use esp_hal::Async;
@@ -29,6 +28,7 @@ use embedded_graphics::{
 };
 use profont::{ PROFONT_24_POINT, PROFONT_18_POINT };
 use tinytga::Tga;
+use crate::draw_panels::{Panel, Payload};
 
 pub type TFTSpiDevice<'spi> = 
     ExclusiveDevice<Spi<'spi, Async>, Output<'spi>, NoDelay>;
@@ -40,19 +40,11 @@ pub type TFTSpiInterface<'spi> =
         >;
 
 
-#[derive(Clone, Copy)]
-pub struct DoubleTimerRectangles {
-    top: Rectangle,
-    middle: Rectangle,
-    bottom_left: Rectangle,
-    bottom_right: Rectangle
-}
 
 // NOTE: Display Hardware
 pub struct TFT<'spi>
 {
     pub display: Ili9341<TFTSpiInterface<'spi>, Output<'spi>>,
-    pub layout_panels: DoubleTimerRectangles
 }
 
 impl<'spi> TFT<'spi> {
@@ -90,27 +82,8 @@ impl<'spi> TFT<'spi> {
             DisplaySize240x320
         ).unwrap();
 
-        let top_panel = 
-                Rectangle::new(Point::new(0, 0), Size::new(320, 64));
-
-        let middle_panel = 
-                Rectangle::new(Point::new(0, 64), Size::new(320, 96));
-
-        let bottom_left_panel = 
-                Rectangle::new(Point::new(0, 160), Size::new(160, 80));
-        let bottom_right_panel = 
-                Rectangle::new(Point::new(160, 160), Size::new(160, 80));
-
-        let layout_panels = DoubleTimerRectangles {
-            top: top_panel,
-            middle: middle_panel, 
-            bottom_left: bottom_left_panel, 
-            bottom_right: bottom_right_panel
-        };
-
         TFT { 
             display,
-            layout_panels
         }
     }
     
@@ -124,29 +97,29 @@ impl<'spi> TFT<'spi> {
             .stroke_alignment(StrokeAlignment::Center)
             .stroke_color(Rgb565::WHITE)
             .build();
-
-        self.layout_panels.middle
-            .into_styled(style)
-            .draw(&mut self.display)
-            .unwrap();
-
-        self.layout_panels.top
-            .into_styled(style)
-            .draw(&mut self.display)
-            .unwrap();
-        self.layout_panels.bottom_left
-            .into_styled(style)
-            .draw(&mut self.display)
-            .unwrap();
-
-        self.layout_panels.bottom_right
-            .into_styled(style)
-            .draw(&mut self.display)
-            .unwrap();
     }
-    
-    pub fn draw_focus_time(&mut self, message: &str) {
-        let mut panel = self.display.clipped(&self.layout_panels.middle);
+
+    pub fn handle_payload(&mut self, panel: &Panel) {
+        let frame = panel.0;
+        let payload = &panel.1;
+
+        match payload {
+            Payload::Time(bytes) => {
+                let message = if let Ok(text) = str::from_utf8(bytes){
+                    text
+                } else {
+                    "error"
+                };
+                esp_println::println!("matched message: {message}");
+                self.render_time(frame, message);
+            }
+            Payload::Empty => ()
+        }
+    }
+
+    pub fn render_time(&mut self, frame: Rectangle, message: &str) {
+        let mut panel = self.display.clipped(&frame);
+        let _ = panel.clear(Rgb565::BLACK);
         let center = panel.bounding_box().center();
 
         let style = MonoTextStyle::new(&PROFONT_24_POINT, Rgb565::WHITE);
@@ -154,17 +127,7 @@ impl<'spi> TFT<'spi> {
         let _ = Text::with_alignment(message, center, style, Alignment::Center)
                 .draw(&mut panel).unwrap();
     }
-
-    pub fn draw_unfocused_time(&mut self, message: &str) {
-        let mut panel = self.display.clipped(&self.layout_panels.bottom_right);
-        let center = panel.bounding_box().center();
-
-        let style = MonoTextStyle::new(&PROFONT_18_POINT, Rgb565::WHITE);
-
-        let _ = Text::with_alignment(message, center, style, Alignment::Center)
-                .draw(&mut panel).unwrap();
-    }
-
+    
     pub fn draw_image(&mut self) {
         let data = include_bytes!("../src/assets/meowl-new.tga");
         let tga: Tga<Rgb565> = Tga::from_slice(data).unwrap();
