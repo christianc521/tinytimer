@@ -4,8 +4,8 @@ use embassy_time::{Duration, Timer};
 
 pub struct Button<'a>(Input<'a>);
 
-const DEBOUNCE_DELAY: Duration = Duration::from_millis(10);
-const LONG_PRESS: Duration = Duration::from_millis(500);
+const DEBOUNCE_DELAY: Duration = Duration::from_millis(50);
+const LONG_PRESS: Duration = Duration::from_millis(1000);
 
 
 impl<'a> Button<'a> {
@@ -16,6 +16,7 @@ impl<'a> Button<'a> {
     #[inline]
     async fn wait_for_button_up(&mut self) -> &mut Self {
         self.0.wait_for_low().await;
+        esp_println::println!("waited for low");
         self
     }
 
@@ -32,10 +33,22 @@ impl<'a> Button<'a> {
         Timer::after(DEBOUNCE_DELAY).await;
         let press_duration = 
             match select(self.wait_for_button_up(), Timer::after(LONG_PRESS)).await {
-                Either::First(_) => PressDuration::Short,
-                Either::Second(()) => PressDuration::Long
+                Either::First(_) => { 
+                    esp_println::println!("Short Press!");
+                    PressDuration::Short
+                },
+                Either::Second(()) => { 
+                    esp_println::println!("Long Press!");
+                    PressDuration::Long
+                }
             };
         press_duration
+    }
+
+    #[inline]
+    pub async fn wait_for_press(&mut self) -> &mut Self {
+        self.0.wait_for_rising_edge().await;
+        self
     }
 }
 

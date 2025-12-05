@@ -2,8 +2,7 @@ use embassy_executor::{SpawnError, Spawner};
 use embassy_futures::select::{select, Either};
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, channel::Channel};
 use embassy_time::{ Duration, Ticker, Timer };
-use crate::{button::{Button, PressDuration}, draw_panels::{Panel, PanelPosition, Payload}, render_display::{TFTNotifier, TFTRender}, tft::TFT, time_util::Time};
-
+use crate::{button::{self, Button, PressDuration}, draw_panels::{Panel, PanelPosition}, render_display::{TFTNotifier, TFTRender}, tft::TFT, time_util::Time};
 
 /*
  * Represents a single Ticker that increments 'run_duration' every tenth of a second
@@ -44,15 +43,8 @@ impl SessionState {
     {
         match self {
             SessionState::Working => self.execute_working(session, button).await,
-            SessionState::Break => todo!(),
-            SessionState::Paused => todo!(),
-        }
-    }
-
-    pub(crate) fn render(self, time: &Time) -> (Panel, Duration) {
-        match self {
-            Self::Working => Self::render_working(time),
-            _ => todo!()
+            SessionState::Break => self.execute_break(session, button).await,
+            SessionState::Paused => self.execute_paused(session, button).await,
         }
     }
 
@@ -60,16 +52,66 @@ impl SessionState {
         session.set_state(self).await;
         match button.press_duration().await {
             PressDuration::Short => {
-                todo!()
+                esp_println::println!("working -> break (short)");
+                Self::Break
             }
             PressDuration::Long => {
-                todo!()
+                esp_println::println!("working -> paused (long)");
+                Self::Paused
             }
         }
     }
 
-    fn render_working(time: &Time) -> (Panel, Duration) {
-        let (display_time, sleep_dur) = time.sleep_100ms();
+    async fn execute_break(self, session: &mut DoubleTimerSession<'_>, button: &mut Button<'_>) -> Self {
+        session.set_state(self).await;
+        match button.press_duration().await {
+            PressDuration::Short => {
+                esp_println::println!("break -> working (short)");
+                Self::Working
+            }
+            PressDuration::Long => {
+                esp_println::println!("working -> paused (long)");
+                Self::Paused
+            }
+        }
+    }
+
+    async fn execute_paused(self, session: &mut DoubleTimerSession<'_>, button: &mut Button<'_>) -> Self {
+        session.set_state(self).await;
+        match button.press_duration().await {
+            PressDuration::Short => {
+                esp_println::println!("pause -> working (short)");
+                Self::Working
+            }
+            PressDuration::Long => {
+                esp_println::println!("pause -> break (long)");
+                Self::Break
+            }
+        }
+    }
+
+    pub(crate) fn render(self, time: &mut Time) -> (Panel, Duration) {
+        match self {
+            Self::Working => Self::render_working(time),
+            Self::Break => Self::render_break(time),
+            Self::Paused => Self::render_paused(time)
+        }
+    }
+
+    fn render_working(time: &mut Time) -> (Panel, Duration) {
+        let (display_time, sleep_dur) = time.sleep_for_work();
+        let panel = Panel::from_time(display_time, PanelPosition::Top);
+        (panel, sleep_dur)
+    }
+
+    fn render_break(time: &mut Time) -> (Panel, Duration) {
+        let (display_time, sleep_dur) = time.sleep_for_break();
+        let panel = Panel::from_time(display_time, PanelPosition::Bottom);
+        (panel, sleep_dur)
+    }
+
+    fn render_paused(time: &mut Time) -> (Panel, Duration) {
+        let (display_time, sleep_dur) = time.sleep_for_pause();
         let panel = Panel::from_time(display_time, PanelPosition::Middle);
         (panel, sleep_dur)
     }
@@ -135,7 +177,7 @@ async fn device_loop(session_notifier: &'static SessionOuterNotifier, tft_render
     let mut session_state = SessionState::default();
 
     loop {
-        let (panel, sleep_dur) = session_state.render(&time);
+        let (panel, sleep_dur) = session_state.render(&mut time);
         tft_renderer.render(panel);
         if let Either::First(notification) = select(session_notifier.receive(), Timer::after(sleep_dur)).await
         {

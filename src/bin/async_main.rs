@@ -1,5 +1,6 @@
 #![no_std]
 #![no_main]
+#![feature(impl_trait_in_assoc_type)]
 
 use embassy_executor::Spawner;
 use esp_backtrace as _;
@@ -13,17 +14,10 @@ use embedded_graphics::{
 use pitft_async::clock_util::{DoubleTimerSession, SessionNotifier};
 use pitft_async::{button::Button, clock_util::SessionState, tft::TFT};
 use log::info;
-use pitft_async::error::{Result, Error};
+use pitft_async::error::Result;
 
 #[derive(Debug)]
 pub enum Never {}
-
-#[embassy_executor::task]
-async fn run() {
-    loop {
-        esp_println::println!("im in da embussy :3")
-    }
-}
 
 #[esp_hal_embassy::main]
 async fn main(spawner: Spawner) -> ! {
@@ -53,14 +47,17 @@ async fn inner_main(spawner: Spawner) -> Result<Never> {
         rst, 
         dc);
     let mut button = Button::new(input);
+    esp_println::println!("Initialized Button!");
+
     let mut state = SessionState::default();
 
     let timg0 = TimerGroup::new(peripherals.TIMG0);
     esp_hal_embassy::init(timg0.timer0);
 
     tft.clear(Rgb565::BLACK);
-    tft.draw_image();
-    tft.render_border();
+    // tft.draw_image();
+    // tft.render_border();
+    tft.initialize_scene();
 
     static SESSION_NOTIFIER: SessionNotifier = DoubleTimerSession::notifier();
     let mut session = DoubleTimerSession::new(tft, spawner, &SESSION_NOTIFIER)?;

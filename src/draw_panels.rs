@@ -8,44 +8,42 @@ pub enum Payload {
 pub enum PanelPosition {
     Top,
     Middle,
-    BottomLeft,
-    BottomRight,
+    Bottom,
+    FullScreen
 }
 
 impl PanelPosition {
     pub fn get_rect(&self) -> Rectangle {
         match self {
             PanelPosition::Top => {
-                    Rectangle::new(Point::new(0, 0), Size::new(320, 64))
+                    Rectangle::new(Point::new(10, 20), Size::new(300, 50))
             },
             PanelPosition::Middle => {
-                    Rectangle::new(Point::new(0, 64), Size::new(320, 96))
+                    Rectangle::new(Point::new(60, 95), Size::new(200, 50))
             },
-            PanelPosition::BottomLeft => {
-                    Rectangle::new(Point::new(0, 160), Size::new(160, 80))
+            PanelPosition::Bottom => {
+                    Rectangle::new(Point::new(10, 160), Size::new(300, 50))
             },
-            PanelPosition::BottomRight => {
-                    Rectangle::new(Point::new(160, 160), Size::new(160, 80))
+            PanelPosition::FullScreen => {
+                    Rectangle::new(Point::zero(), Size::new(320, 240))
             },
         }
     }
 }
 
-pub struct Panel(pub Rectangle, pub Payload);
+pub struct Panel(pub PanelPosition, pub Payload);
 
 impl Default for Panel {
     fn default() -> Self {
-        let default_frame = Rectangle::new(Point::zero(), Size::new(320, 240));
-        let default_payload = Payload::Empty;
-        Panel(default_frame, default_payload)
+        let empty_time = Payload::Time([0; 20]);
+        Panel(PanelPosition::Top, empty_time)
     }
 }
 
 impl Panel {
     pub fn from_time(time: [u8; 20], position: PanelPosition) -> Self {
-        let rectangle = position.get_rect();
         let payload = Payload::Time(time);
-        Panel(rectangle, payload)
+        Panel(position, payload)
     }
 }
 
