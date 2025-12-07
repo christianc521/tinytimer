@@ -1,5 +1,5 @@
-use embedded_graphics::prelude::Point;
-
+use embedded_graphics::{pixelcolor::Rgb565, prelude::{PixelColor, RgbColor}, primitives::Rectangle, Drawable};
+use crate::clickable::ClickableElement;
 
 pub enum Scene {
     ConfigTaro,
@@ -7,58 +7,80 @@ pub enum Scene {
     ConfigCountingUp,
 }
 
-enum UIElement {
-    Menu(u8),
-    Clickable(),
-    Scrollable,
-    Empty
+pub trait UINode {
+    fn get_position(&self) -> &Rectangle;
+
+    fn handle_action(&mut self, scene: &mut SceneData, action: UIAction);
 }
 
-enum UIAction {
+pub enum UIType {
+    Menu(),
+    Clickable(ClickableElement),
+    Digits(DigitsElement),
+    TextBox
+}
+
+pub enum UIAction {
     Back,
     Select,
     MoveBack,
     MoveNext
 }
 
-struct SceneData {
-    scene: Scene,
-    cursor_index: u8,
-    curr_level: u8,
+pub struct SceneData {
+    pub scene: Scene,
+    pub elements: [UIType; 20],
+    pub cursor_index: u8,
 }
 
-struct UINode<'a> {
-    parent: Option<&'a UINode<'a>>,
-    child: Option<&'a UINode<'a>>,
-    element_type: UIElement,
-    position: Point
+pub struct DigitsElement {
+    pub position: Rectangle,
+    pub current_digit: u8,
+    next_element: u8,
+    prev_element: u8
 }
 
-pub struct SceneManager {
-    pub curr_scene: Scene
+impl UINode for DigitsElement 
+{
+   fn get_position(&self) -> &Rectangle {
+        &self.position
+   } 
+
+   fn handle_action(&mut self, scene: &mut SceneData, action: UIAction) {
+       match action {
+            UIAction::MoveBack => {
+                if self.current_digit == 0 {
+                    self.current_digit = 9;
+                }
+                self.current_digit -= 1;
+            }
+            UIAction::MoveNext => {
+                if self.current_digit == 9 {
+                    self.current_digit = 0;
+                }
+                self.current_digit += 1;
+            }
+            UIAction::Select => {
+                scene.cursor_index = self.next_element;
+            }
+            UIAction::Back => {
+                scene.cursor_index = self.prev_element;
+            }
+       }
+   }
 }
 
-impl SceneManager {
-    pub fn initialize(scene: Scene) -> Self {
-        let menu_config = match scene {
-            Scene::ConfigTaro => {
+impl Drawable for DigitsElement 
+{
+    type Color = Rgb565;
+    type Output = ();
 
-            }
-            Scene::ConfigTaroPlus => {
-
-            }
-            Scene::ConfigCountingUp => {
-
-            }
-        };
-
-        SceneManager {
-            curr_scene: scene
-        }
+    fn draw<D>(&self, target: &mut D) -> Result<Self::Output, D::Error>
+        where
+            D: embedded_graphics::prelude::DrawTarget<Color = Self::Color> {
+                todo!()
+        
     }
 
-    pub fn init_config_taro() {
-
-    }
-
 }
+

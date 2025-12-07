@@ -1,7 +1,7 @@
 use embassy_executor::{SpawnError, Spawner};
 use embassy_futures::select::{select, Either};
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, signal::Signal};
-use embassy_time::{Duration, Timer};
+use embassy_time::{Duration, Ticker, Timer};
 
 use crate::tft::TFT;
 use crate::draw_panels::Panel;
@@ -49,22 +49,33 @@ async fn inner_render_loop(
     notifier: &'static TFTNotifier
 ) -> ! {
     let mut panel = Panel::default();
+    let mut frame_ticker = Ticker::every(Duration::from_hz(30));
     'outer: loop {
-        // pass off the state information to the hardware wrapper
-        tft.handle_payload(&panel);
 
-        // either wait for a new payload or sleep for 4 seconds
-        let sleep_or_signal = 
-            select(
-                Timer::after_secs(4), 
-                notifier.wait()
-            ).await;
+        // Hybrid Rendering System
+        // 30 FPS while playing animations
+        // Event-driven renders for state changes
 
-        // if a new payload was recieved before the sleep, 
-        // start loop with new payload
-        if let Either::Second(notification) = sleep_or_signal {
-            panel = notification;
-            continue 'outer
+        if tft.playing_animation {
+            tft.handle_payload(&panel);
+            frame_ticker.next().await;
+        } else {
+            // pass off the state information to the hardware wrapper
+            tft.handle_payload(&panel);
+
+            // either wait for a new payload or sleep for 4 seconds
+            let sleep_or_signal = 
+                select(
+                    Timer::after_secs(4), 
+                    notifier.wait()
+                ).await;
+
+            // if a new payload was recieved before the sleep, 
+            // start loop with new payload
+            if let Either::Second(notification) = sleep_or_signal {
+                panel = notification;
+                continue 'outer
+            }
         }
     }
 }

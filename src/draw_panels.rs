@@ -2,6 +2,7 @@ use embedded_graphics::{prelude::{Point, Size}, primitives::Rectangle};
 
 pub enum Payload {
     Time([u8; 20]),
+    CursorMove(Point, Point),
     Empty
 }
 

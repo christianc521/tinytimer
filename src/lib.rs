@@ -12,3 +12,4 @@ pub mod error;
 pub mod constants;
 pub mod time_util;
 pub mod scenes;
+pub mod clickable;

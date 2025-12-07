@@ -2,10 +2,11 @@ use embedded_graphics_framebuf::FrameBuf;
 use esp_backtrace as _;
 use esp_hal::gpio::Output;
 use esp_hal::Async;
+use heapless::Vec;
 use embedded_hal_bus::spi::{ExclusiveDevice, NoDelay};
 use display_interface_spi::SPIInterface;
 use ili9341::{DisplaySize240x320, Ili9341, Orientation};
-use embedded_graphics::{geometry::Point, mono_font::{MonoTextStyle, MonoTextStyleBuilder}, primitives::{Line, Polyline, PrimitiveStyle, StyledDrawable, Triangle}, text::{renderer::CharacterStyle, Alignment, Baseline, TextStyleBuilder}};
+use embedded_graphics::{geometry::{ AnchorPoint, Point }, iterator::raw::RawDataSlice, mono_font::{MonoTextStyle, MonoTextStyleBuilder}, pixelcolor::raw::BigEndian, primitives::{Line, Polyline, PrimitiveStyle, StyledDrawable, Triangle}, text::{renderer::CharacterStyle, Alignment, Baseline, TextStyleBuilder}, pixelcolor::raw::{RawU16}};
 use esp_backtrace as _;
 use eg_seven_segment::{SevenSegmentStyleBuilder};
 use esp_hal::{
@@ -44,7 +45,8 @@ pub type TFTSpiInterface<'spi> =
 pub struct TFT<'spi>
 {
     pub display: Ili9341<TFTSpiInterface<'spi>, Output<'spi>>,
-    top_frame_buffer: FrameBuf<Rgb565, [Rgb565; 15000]>,
+    pub playing_animation: bool,
+    top_frame_buffer: FrameBuf<Rgb565, [Rgb565; 76800]>,
 }
 
 impl<'spi> TFT<'spi> {
@@ -82,10 +84,11 @@ impl<'spi> TFT<'spi> {
             DisplaySize240x320
         ).unwrap();
 
-        let top_fb = FrameBuf::new_with_origin([Rgb565::WHITE; 300 * 50], 300, 50, Point::new(0, 20));
+        let top_fb = FrameBuf::new_with_origin([Rgb565::WHITE; 320 * 240], 320, 240, Point::new(0, 0));
 
         TFT { 
             display,
+            playing_animation: false,
             top_frame_buffer: top_fb,
         }
     }
@@ -118,8 +121,43 @@ impl<'spi> TFT<'spi> {
                 };
                 self.render_segmented(frame, message);
                 self.render_divider(state);
-            }
-            Payload::Empty => ()
+            },
+            Payload::CursorMove(start, end) => self.animate_cursor(start, end),
+            Payload::Empty => (),
+        }
+    }
+
+    fn animate_cursor(&mut self, start: &Point, end: &Point) {
+        let initial_data = self.top_frame_buffer.data;
+        let area = self.top_frame_buffer.bounding_box();
+
+        let mut cursor = Rectangle::with_corners(Point::zero(), *start);
+        let cursor_style = PrimitiveStyleBuilder::new()
+            .stroke_color(Rgb565::new(154, 153, 150))
+            .stroke_width(2)
+            .stroke_alignment(StrokeAlignment::Inside)
+            .build();
+
+        let route = Line::new(start.clone(), end.clone());
+
+        for point in route.points() {
+            // Clear the cursor from the buffer
+            self.top_frame_buffer.data = initial_data;
+
+            // Draw display without the cursor
+            self.display.fill_contiguous(&area, self.top_frame_buffer.data).unwrap();
+
+            // Move the bottom right corner of the cursor to 
+            // a point on the slope (travel route)
+            let x = point.x as u32;
+            let y = point.y as u32;
+            cursor = cursor.resized(Size::new(x, y), AnchorPoint::TopLeft);
+
+            // Update buffer data with a new cursor and position
+            let _ = cursor.draw_styled(&cursor_style, &mut self.top_frame_buffer).unwrap();
+            
+            // Draw the buffer to display with the cursor
+            self.display.fill_contiguous(&area, self.top_frame_buffer.data).unwrap();
         }
     }
     
