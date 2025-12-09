@@ -1,8 +1,11 @@
 use embedded_graphics::{prelude::{Point, Size}, primitives::Rectangle};
 
+use crate::animations::Animation;
+
 pub enum Payload {
     Time([u8; 20]),
     CursorMove(Point, Point),
+    Animate(Animation),
     Empty
 }
 

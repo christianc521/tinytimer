@@ -30,7 +30,7 @@ use embedded_graphics::{
 
 use profont::PROFONT_18_POINT;
 use tinytga::Tga;
-use crate::{clock_util::SessionState, draw_panels::{Panel, PanelPosition, Payload}};
+use crate::{animations::{Animation, FrameType}, clock_util::SessionState, draw_panels::{Panel, PanelPosition, Payload}, scenes::SceneManager};
 
 pub type TFTSpiDevice<'spi> = 
     ExclusiveDevice<Spi<'spi, Async>, Output<'spi>, NoDelay>;
@@ -47,6 +47,7 @@ pub struct TFT<'spi>
     pub display: Ili9341<TFTSpiInterface<'spi>, Output<'spi>>,
     pub playing_animation: bool,
     top_frame_buffer: FrameBuf<Rgb565, [Rgb565; 76800]>,
+    scene_manager: SceneManager
 }
 
 impl<'spi> TFT<'spi> {
@@ -90,6 +91,7 @@ impl<'spi> TFT<'spi> {
             display,
             playing_animation: false,
             top_frame_buffer: top_fb,
+            scene_manager: SceneManager::default()
         }
     }
     
@@ -123,8 +125,55 @@ impl<'spi> TFT<'spi> {
                 self.render_divider(state);
             },
             Payload::CursorMove(start, end) => self.animate_cursor(start, end),
-            Payload::Empty => (),
+            Payload::Animate(animation) => {
+                // Index flag for empty space in the queue
+                let mut empty_index: Option<usize> = None;
+
+                // Check for space in the SceneManager animation_queue
+                for ( index, queued_animation) in 
+                    self
+                    .scene_manager
+                    .animation_queue
+                    .iter_mut()
+                    .enumerate() {
+                    match queued_animation {
+                        Animation::Empty => {
+                            empty_index = Some(index);
+                            break;
+                        },
+                        _ => ()
+                    }
+                }
+
+                // Only add the animation to the queue if there's space
+                if let Some(index) = empty_index {
+                    self.scene_manager.animation_queue[index] = *animation;
+                    self.playing_animation = true;
+                    self.render_next_frame();
+                }
+            }
+            _ => (),
         }
+    }
+
+    pub fn render_next_frame(&mut self) {
+        // Grab array of frames to be rendered
+        let frame_queue = self.scene_manager.play_next();
+
+        // Empties flag; 
+        // if equal to SceneManager animation_queue[] capacity,
+        // all animations have been exhausted
+        // set tft playing_animation to false
+        let mut empty_count: u8 = 0;
+        for frame in frame_queue {
+            match frame {
+                FrameType::Rectangle(rect) => todo!(),
+                FrameType::Empty => empty_count += 1
+            }
+        }
+
+        // Turn off 30 fps render flag if no more frames in the queue
+        if empty_count == 6 { self.playing_animation = false };
     }
 
     fn animate_cursor(&mut self, start: &Point, end: &Point) {

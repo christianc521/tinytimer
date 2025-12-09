@@ -56,23 +56,36 @@ async fn inner_render_loop(
         // 30 FPS while playing animations
         // Event-driven renders for state changes
 
-        if tft.playing_animation {
-            tft.handle_payload(&panel);
-            frame_ticker.next().await;
-        } else {
-            // pass off the state information to the hardware wrapper
-            tft.handle_payload(&panel);
+        // handle any incoming event payloads first [high priority] 
+        tft.handle_payload(&panel);
 
+        if !tft.playing_animation {
             // either wait for a new payload or sleep for 4 seconds
-            let sleep_or_signal = 
+            let sleep1sec_or_signal = 
                 select(
-                    Timer::after_secs(4), 
+                    Timer::after_secs(1), 
                     notifier.wait()
                 ).await;
 
             // if a new payload was recieved before the sleep, 
             // start loop with new payload
-            if let Either::Second(notification) = sleep_or_signal {
+            if let Either::Second(notification) = sleep1sec_or_signal {
+                panel = notification;
+                continue 'outer
+            }
+        } else {
+            // either wait for a new payload or wait for the next draw frame
+            let sleep30hz_or_signal = 
+                select(
+                    frame_ticker.next(), 
+                    notifier.wait()
+                ).await;
+
+            // TODO: call tft render_next_frame on all animated elements
+
+            // if a new payload was recieved before the next draw frame (30fps), 
+            // start loop with new payload
+            if let Either::Second(notification) = sleep30hz_or_signal {
                 panel = notification;
                 continue 'outer
             }

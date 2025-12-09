@@ -1,5 +1,4 @@
 use embedded_graphics::primitives::Rectangle;
-
 use crate::scenes::{UIAction, UINode};
 
 pub struct ClickableElement {

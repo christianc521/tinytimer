@@ -13,3 +13,5 @@ pub mod constants;
 pub mod time_util;
 pub mod scenes;
 pub mod clickable;
+pub mod animations;
+pub mod raw_sprites;
