@@ -1,6 +1,20 @@
 use embedded_graphics::{prelude::Point, primitives::{line::Line, Rectangle}};
 use embedded_graphics::prelude::*;
 use embedded_graphics::geometry::AnchorPoint;
+use crate::constants::MAX_ANIMATIONS;
+
+#[derive(Debug, Copy, Clone)]
+pub struct AnimationState {
+    pub queue: [Animation; MAX_ANIMATIONS],
+}
+
+impl Default for AnimationState {
+    fn default() -> Self {
+        AnimationState {
+            queue: [Animation::Empty; MAX_ANIMATIONS]
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy)]
 pub enum Animation {
@@ -76,7 +90,7 @@ impl CursorMove {
 
     pub fn get_frame(&mut self) -> FrameType {
         let mut frame = FrameType::Empty;
-        if self.frame_data.frame_index > self.frame_data.frame_count {
+        if self.frame_data.frame_index >= self.frame_data.frame_count {
             let position = self.path.points()
                 .nth(self.frame_data.frame_index as usize)
                 .unwrap();

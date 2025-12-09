@@ -1,6 +1,7 @@
 use embedded_graphics::primitives::Rectangle;
 use crate::scenes::{UIAction, UINode};
 
+#[derive(Debug, Clone, Copy)]
 pub struct ClickableElement {
     pub position: Rectangle,
     pub value: u8,

@@ -2,9 +2,9 @@ use core::{default, ops::Index};
 
 use embedded_graphics::{pixelcolor::Rgb565, prelude::{PixelColor, RgbColor}, primitives::Rectangle, Drawable};
 use heapless::Vec;
-use crate::{animations::{Animation, AnimationEvent, FrameType}, clickable::ClickableElement};
+use crate::{animations::{Animation, AnimationEvent, AnimationState, FrameType}, clickable::ClickableElement};
 
-#[derive(Default)]
+#[derive(Default, Debug, Clone, Copy)]
 pub enum Scene {
     #[default]
     ConfigTaro,
@@ -18,6 +18,7 @@ pub trait UINode {
     fn handle_action(&mut self, scene: &mut SceneData, action: UIAction);
 }
 
+#[derive(Debug, Clone, Copy)]
 pub enum UIType {
     Menu(),
     Clickable(ClickableElement),
@@ -34,24 +35,27 @@ pub enum UIAction {
 
 pub struct SceneManager {
     pub current_scene: SceneData,
-    pub playing_animation: bool,
-    pub animation_queue: [Animation; 6]
+    pub animation_queue: AnimationState
 }
 
 impl Default for SceneManager {
     fn default() -> Self {
         SceneManager {
             current_scene: SceneData::default(),
-            playing_animation: false,
-            animation_queue: [const {Animation::Empty}; 6]
+            animation_queue: AnimationState::default()
         }
     }
 }
 
 impl SceneManager {
+    pub fn initialize_scene(&mut self, new_scene: SceneData) {
+        self.current_scene = new_scene;
+    }
+
     pub fn play_next(&mut self) -> [FrameType; 6] {
         let mut frames = Vec::<FrameType, 6>::new();
         for ( index, animation ) in self.animation_queue
+            .queue
             .iter_mut()
             .enumerate() {
             match animation {
@@ -81,6 +85,7 @@ impl SceneManager {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
 pub struct SceneData {
     pub scene: Scene,
     pub elements: [UIType; 10],
@@ -99,6 +104,7 @@ const TARO_CONFIG_SCENE: SceneData = SceneData {
     cursor_index: 0
 };
 
+#[derive(Debug, Clone, Copy)]
 pub struct DigitsElement {
     pub position: Rectangle,
     pub current_digit: u8,

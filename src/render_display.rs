@@ -5,6 +5,7 @@ use embassy_time::{Duration, Ticker, Timer};
 
 use crate::tft::TFT;
 use crate::draw_panels::Panel;
+use crate::constants::FRAME_RATE;
 
 #[derive(Debug)]
 pub enum Never {
@@ -49,7 +50,7 @@ async fn inner_render_loop(
     notifier: &'static TFTNotifier
 ) -> ! {
     let mut panel = Panel::default();
-    let mut frame_ticker = Ticker::every(Duration::from_hz(30));
+    let mut frame_ticker = Ticker::every(Duration::from_hz(FRAME_RATE));
     'outer: loop {
 
         // Hybrid Rendering System

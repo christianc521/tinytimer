@@ -1,14 +1,16 @@
 use embedded_graphics::{prelude::{Point, Size}, primitives::Rectangle};
 
-use crate::animations::Animation;
+use crate::{animations::Animation, scenes::SceneData};
 
+#[derive(Debug, Clone, Copy)]
 pub enum Payload {
     Time([u8; 20]),
-    CursorMove(Point, Point),
     Animate(Animation),
+    NewScene(SceneData),
     Empty
 }
 
+#[derive(Debug, Clone, Copy)]
 pub enum PanelPosition {
     Top,
     Middle,

@@ -2,11 +2,10 @@ use embedded_graphics_framebuf::FrameBuf;
 use esp_backtrace as _;
 use esp_hal::gpio::Output;
 use esp_hal::Async;
-use heapless::Vec;
 use embedded_hal_bus::spi::{ExclusiveDevice, NoDelay};
 use display_interface_spi::SPIInterface;
 use ili9341::{DisplaySize240x320, Ili9341, Orientation};
-use embedded_graphics::{geometry::{ AnchorPoint, Point }, iterator::raw::RawDataSlice, mono_font::{MonoTextStyle, MonoTextStyleBuilder}, pixelcolor::raw::BigEndian, primitives::{Line, Polyline, PrimitiveStyle, StyledDrawable, Triangle}, text::{renderer::CharacterStyle, Alignment, Baseline, TextStyleBuilder}, pixelcolor::raw::{RawU16}};
+use embedded_graphics::{geometry::Point, mono_font::{MonoTextStyle, MonoTextStyleBuilder}, primitives::{ Polyline, PrimitiveStyle, StyledDrawable, Triangle}, text::{ Alignment, Baseline, TextStyleBuilder}};
 use esp_backtrace as _;
 use eg_seven_segment::{SevenSegmentStyleBuilder};
 use esp_hal::{
@@ -27,10 +26,11 @@ use embedded_graphics::{
     primitives::{PrimitiveStyleBuilder, Rectangle, StrokeAlignment},
     text::Text,
 };
-
 use profont::PROFONT_18_POINT;
 use tinytga::Tga;
+
 use crate::{animations::{Animation, FrameType}, clock_util::SessionState, draw_panels::{Panel, PanelPosition, Payload}, scenes::SceneManager};
+use crate::constants::MAX_ANIMATIONS;
 
 pub type TFTSpiDevice<'spi> = 
     ExclusiveDevice<Spi<'spi, Async>, Output<'spi>, NoDelay>;
@@ -107,7 +107,7 @@ impl<'spi> TFT<'spi> {
     // Match state machine events to draw functions
     pub fn handle_payload(&mut self, panel: &Panel) {
         let frame = &panel.0;
-        let payload = &panel.1;
+        let payload = panel.1;
         let state = match frame {
             PanelPosition::Top => SessionState::Working,
             PanelPosition::Bottom => SessionState::Break,
@@ -116,7 +116,7 @@ impl<'spi> TFT<'spi> {
 
         match payload {
             Payload::Time(bytes) => {
-                let message = if let Ok(text) = str::from_utf8(bytes){
+                let message = if let Ok(text) = str::from_utf8(&bytes){
                     text
                 } else {
                     "error"
@@ -124,39 +124,39 @@ impl<'spi> TFT<'spi> {
                 self.render_segmented(frame, message);
                 self.render_divider(state);
             },
-            Payload::CursorMove(start, end) => self.animate_cursor(start, end),
             Payload::Animate(animation) => {
-                // Index flag for empty space in the queue
-                let mut empty_index: Option<usize> = None;
-
-                // Check for space in the SceneManager animation_queue
-                for ( index, queued_animation) in 
-                    self
-                    .scene_manager
-                    .animation_queue
-                    .iter_mut()
-                    .enumerate() {
-                    match queued_animation {
-                        Animation::Empty => {
-                            empty_index = Some(index);
-                            break;
-                        },
-                        _ => ()
-                    }
-                }
-
                 // Only add the animation to the queue if there's space
-                if let Some(index) = empty_index {
-                    self.scene_manager.animation_queue[index] = *animation;
-                    self.playing_animation = true;
-                    self.render_next_frame();
+                if let Some(index) = self.scene_manager
+                    .animation_queue
+                    .queue
+                    .iter()
+                    .position(|a| matches!(a, Animation::Empty)) {
+
+                        self.scene_manager
+                            .animation_queue
+                            .queue[index] = animation;
+
+                        self.playing_animation = true;
+                        self.render_next_frame();
                 }
+            }
+            Payload::NewScene(new_scene) => {
+                self.scene_manager.initialize_scene(new_scene);
             }
             _ => (),
         }
     }
 
     pub fn render_next_frame(&mut self) {
+        // Reset clear display of any animation elements 
+        // to prepare for next frame
+        let initial_data = self.top_frame_buffer.data;
+        let area = self.display.bounding_box();
+
+        self.display
+            .fill_contiguous(&area, initial_data)
+            .unwrap();
+
         // Grab array of frames to be rendered
         let frame_queue = self.scene_manager.play_next();
 
@@ -164,50 +164,35 @@ impl<'spi> TFT<'spi> {
         // if equal to SceneManager animation_queue[] capacity,
         // all animations have been exhausted
         // set tft playing_animation to false
-        let mut empty_count: u8 = 0;
+        let mut empty_count: usize = 0;
         for frame in frame_queue {
             match frame {
-                FrameType::Rectangle(rect) => todo!(),
+                FrameType::Rectangle(rect) => self.animate_cursor(rect),
                 FrameType::Empty => empty_count += 1
             }
         }
 
         // Turn off 30 fps render flag if no more frames in the queue
-        if empty_count == 6 { self.playing_animation = false };
+        if empty_count == MAX_ANIMATIONS { self.playing_animation = false };
     }
 
-    fn animate_cursor(&mut self, start: &Point, end: &Point) {
-        let initial_data = self.top_frame_buffer.data;
-        let area = self.top_frame_buffer.bounding_box();
-
-        let mut cursor = Rectangle::with_corners(Point::zero(), *start);
+    fn animate_cursor(&mut self, cursor: Rectangle) {
+        let area = &self.display.bounding_box();
         let cursor_style = PrimitiveStyleBuilder::new()
             .stroke_color(Rgb565::new(154, 153, 150))
             .stroke_width(2)
             .stroke_alignment(StrokeAlignment::Inside)
             .build();
 
-        let route = Line::new(start.clone(), end.clone());
-
-        for point in route.points() {
-            // Clear the cursor from the buffer
-            self.top_frame_buffer.data = initial_data;
-
-            // Draw display without the cursor
-            self.display.fill_contiguous(&area, self.top_frame_buffer.data).unwrap();
-
-            // Move the bottom right corner of the cursor to 
-            // a point on the slope (travel route)
-            let x = point.x as u32;
-            let y = point.y as u32;
-            cursor = cursor.resized(Size::new(x, y), AnchorPoint::TopLeft);
-
-            // Update buffer data with a new cursor and position
-            let _ = cursor.draw_styled(&cursor_style, &mut self.top_frame_buffer).unwrap();
-            
-            // Draw the buffer to display with the cursor
-            self.display.fill_contiguous(&area, self.top_frame_buffer.data).unwrap();
-        }
+        // Update buffer data with a new cursor and position
+        let _ = cursor
+            .draw_styled(&cursor_style, &mut self.top_frame_buffer)
+            .unwrap();
+        
+        // Draw the buffer to display with the cursor
+        self.display
+            .fill_contiguous(&area, self.top_frame_buffer.data)
+            .unwrap();
     }
     
     #[inline]
